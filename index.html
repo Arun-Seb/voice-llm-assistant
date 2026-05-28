@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Local Voice Assistant — Llama 3.2</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #f0efe9;
+    display: flex;
+    justify-content: center;
+    padding: 2rem 1rem;
+    min-height: 100vh;
+  }
+
+  .card {
+    background: #fff;
+    border-radius: 20px;
+    padding: 2rem;
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+    height: fit-content;
+  }
+
+  h1 { font-size: 20px; font-weight: 600; color: #1a1a1a; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #999; margin-bottom: 1.5rem; }
+
+  .info-box {
+    background: #e8f5ee;
+    border-radius: 10px;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #0a5c38;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Pipeline */
+  .pipeline { display: flex; align-items: center; gap: 8px; margin-bottom: 1.5rem; }
+  .step {
+    flex: 1;
+    border: 1px solid #e8e8e4;
+    border-radius: 10px;
+    background: #fafaf8;
+    padding: 12px 6px;
+    text-align: center;
+    font-size: 11px;
+    color: #aaa;
+    transition: all 0.25s;
+  }
+  .step .ico { font-size: 22px; margin-bottom: 5px; }
+  .step.active { border-color: #7f77dd; background: #f0effd; color: #534ab7; font-weight: 600; }
+  .step.done   { border-color: #1d9e75; background: #e8f5ee; color: #0f6e56; }
+  .arrow { color: #ccc; font-size: 14px; flex-shrink: 0; }
+
+  /* Orb */
+  .orb-zone { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 1.5rem; }
+  .orb {
+    width: 96px; height: 96px;
+    border-radius: 50%;
+    border: 1.5px solid #ddd;
+    background: #f5f5f0;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    font-size: 38px;
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .orb:hover { background: #e8f0fd; border-color: #aab8f0; transform: scale(1.04); }
+  .orb.listening { background: #faece7; border-color: #d85a30; animation: pulse 1.2s ease-in-out infinite; }
+  .orb.thinking  { background: #eeedfe; border-color: #7f77dd; }
+  .orb.speaking  { background: #e1f5ee; border-color: #1d9e75; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.07)} }
+
+  .status { font-size: 13px; color: #999; text-align: center; min-height: 20px; }
+
+  /* Chat bubbles */
+  .bubbles {
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 1rem;
+    max-height: 280px; overflow-y: auto;
+  }
+  .bubble {
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.55;
+    max-width: 88%;
+  }
+  .bubble.user { background: #e8f0fd; align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bubble.ai   { background: #f5f5f0; border: 1px solid #eee; align-self: flex-start; border-bottom-left-radius: 4px; }
+  .bubble-label { font-size: 11px; color: #bbb; margin-bottom: 4px; }
+
+  /* Model selector */
+  .model-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 1.2rem;
+  }
+  .model-row label { font-size: 12px; color: #888; white-space: nowrap; }
+  .model-row select {
+    flex: 1; font-size: 13px;
+    border: 1px solid #e0e0da;
+    border-radius: 8px;
+    padding: 6px 10px;
+    background: #fafaf8;
+    color: #333;
+  }
+
+  /* Error */
+  .err { font-size: 13px; color: #c0392b; text-align: center; margin: 6px 0; min-height: 18px; }
+
+  /* Controls */
+  .controls { display: flex; gap: 8px; }
+  .controls button {
+    flex: 1; padding: 9px;
+    border: 1px solid #e0e0da;
+    border-radius: 10px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    color: #555;
+    transition: background 0.15s;
+  }
+  .controls button:hover { background: #f5f5f0; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🎙️ Local Voice Assistant</h1>
+  <div class="subtitle">Powered by Ollama — fully offline, no API key needed</div>
+
+  <div class="info-box">
+    ✅ Talks to Ollama on <strong>localhost:11434</strong> — no internet required
+  </div>
+
+  <!-- Model picker -->
+  <div class="model-row">
+    <label>Model</label>
+    <select id="model-select">
+      <option value="llama3.2:1b">llama3.2:1b (fastest, ~1 GB)</option>
+      <option value="llama3.2:3b">llama3.2:3b (~2 GB)</option>
+      <option value="phi3:mini">phi3:mini (~2.5 GB)</option>
+      <option value="gemma2:2b">gemma2:2b (~2 GB)</option>
+      <option value="mistral:7b">mistral:7b (~5 GB)</option>
+    </select>
+  </div>
+
+  <!-- Pipeline -->
+  <div class="pipeline">
+    <div class="step" id="step-stt"><div class="ico">🎤</div>Mic → Text</div>
+    <div class="arrow">→</div>
+    <div class="step" id="step-llm"><div class="ico">🧠</div>Local LLM</div>
+    <div class="arrow">→</div>
+    <div class="step" id="step-tts"><div class="ico">🔊</div>Text → Voice</div>
+  </div>
+
+  <!-- Orb -->
+  <div class="orb-zone">
+    <div class="orb" id="orb" onclick="startListening()" title="Click to speak">🎤</div>
+    <div class="status" id="status">Click the orb and speak</div>
+  </div>
+
+  <!-- Chat -->
+  <div class="bubbles" id="bubbles"></div>
+  <div class="err" id="err"></div>
+
+  <!-- Buttons -->
+  <div class="controls">
+    <button onclick="clearAll()">🗑 Clear chat</button>
+    <button id="btn-stop" onclick="stopSpeaking()" style="display:none">⏹ Stop speaking</button>
+  </div>
+</div>
+
+<script>
+const orb       = document.getElementById('orb');
+const statusEl  = document.getElementById('status');
+const bubblesEl = document.getElementById('bubbles');
+const errEl     = document.getElementById('err');
+const btnStop   = document.getElementById('btn-stop');
+const modelSel  = document.getElementById('model-select');
+const steps     = {
+  stt: document.getElementById('step-stt'),
+  llm: document.getElementById('step-llm'),
+  tts: document.getElementById('step-tts')
+};
+
+let history = [];
+let busy    = false;
+
+// ── Pipeline UI ──────────────────────────────────────────────
+function setStep(active) {
+  const order = ['stt', 'llm', 'tts'];
+  Object.keys(steps).forEach(k => {
+    steps[k].classList.remove('active', 'done');
+    if (order.indexOf(k) < order.indexOf(active)) steps[k].classList.add('done');
+    if (k === active) steps[k].classList.add('active');
+  });
+}
+function clearSteps() { Object.values(steps).forEach(s => s.classList.remove('active', 'done')); }
+
+// ── Orb UI ───────────────────────────────────────────────────
+function setOrb(state, icon) {
+  orb.className = 'orb' + (state ? ' ' + state : '');
+  orb.textContent = icon;
+}
+
+// ── Chat bubbles ─────────────────────────────────────────────
+function addBubble(role, text) {
+  const wrap = document.createElement('div');
+  wrap.className = 'bubble ' + role;
+  const lbl = document.createElement('div');
+  lbl.className = 'bubble-label';
+  lbl.textContent = role === 'user' ? 'You' : modelSel.value;
+  wrap.appendChild(lbl);
+  const txt = document.createElement('div');
+  txt.textContent = text;
+  wrap.appendChild(txt);
+  bubblesEl.appendChild(wrap);
+  bubblesEl.scrollTop = bubblesEl.scrollHeight;
+}
+
+function clearAll() {
+  bubblesEl.innerHTML = '';
+  history = [];
+  errEl.textContent = '';
+  clearSteps();
+  statusEl.textContent = 'Chat cleared — click to start';
+}
+
+// ── Stop TTS ─────────────────────────────────────────────────
+function stopSpeaking() {
+  speechSynthesis.cancel();
+  btnStop.style.display = 'none';
+  setOrb('', '🎤');
+  clearSteps();
+  statusEl.textContent = 'Click the orb and speak';
+  busy = false;
+}
+
+// ── Call Ollama ───────────────────────────────────────────────
+async function callOllama(text) {
+  const model = modelSel.value;
+  history.push({ role: 'user', content: text });
+
+  const res = await fetch('http://localhost:11434/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'system',
+          content: 'You are a helpful voice assistant. Give concise answers of 1-3 sentences suitable for speaking aloud. Avoid markdown, bullet points, or special characters.'
+        },
+        ...history
+      ],
+      stream: false
+    })
+  });
+
+  if (!res.ok) {
+    const msg = res.status === 404
+      ? `Model "${model}" not found. Run: ollama pull ${model}`
+      : `Ollama error ${res.status}. Is Ollama running?`;
+    throw new Error(msg);
+  }
+
+  const data  = await res.json();
+  const reply = data.message?.content || '(no response)';
+  history.push({ role: 'assistant', content: reply });
+  return reply;
+}
+
+// ── Text-to-Speech ────────────────────────────────────────────
+function speak(text) {
+  return new Promise(resolve => {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate  = 1.0;
+    u.pitch = 1.0;
+    u.onend   = resolve;
+    u.onerror = resolve;
+    speechSynthesis.speak(u);
+  });
+}
+
+// ── Main flow ─────────────────────────────────────────────────
+async function startListening() {
+  if (busy) return;
+  errEl.textContent = '';
+
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    errEl.textContent = 'Speech recognition requires Chrome or Edge.';
+    return;
+  }
+
+  busy = true;
+  const rec = new SR();
+  rec.lang            = 'en-US';
+  rec.interimResults  = false;
+  rec.maxAlternatives = 1;
+
+  setOrb('listening', '🎤');
+  setStep('stt');
+  statusEl.textContent = 'Listening…';
+
+  rec.onresult = async (e) => {
+    const transcript = e.results[0][0].transcript;
+    addBubble('user', transcript);
+
+    setOrb('thinking', '🧠');
+    setStep('llm');
+    statusEl.textContent = 'Thinking…';
+
+    try {
+      const reply = await callOllama(transcript);
+      addBubble('ai', reply);
+
+      setStep('tts');
+      setOrb('speaking', '🔊');
+      statusEl.textContent = 'Speaking…';
+      btnStop.style.display = 'block';
+
+      await speak(reply);
+    } catch (err) {
+      errEl.textContent = err.message;
+    }
+
+    btnStop.style.display = 'none';
+    setOrb('', '🎤');
+    clearSteps();
+    statusEl.textContent = 'Click the orb and speak';
+    busy = false;
+  };
+
+  rec.onerror = (e) => {
+    errEl.textContent = 'Mic error: ' + e.error;
+    setOrb('', '🎤');
+    clearSteps();
+    statusEl.textContent = 'Click to try again';
+    busy = false;
+  };
+
+  rec.start();
+}
+</script>
+</body>
+</html>
